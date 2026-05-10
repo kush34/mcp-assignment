@@ -1,25 +1,24 @@
+const BASE = import.meta.env.VITE_BACKEND_URL || "";
+
 const JSON_HEADERS = {
     "content-type": "application/json"
 };
 
 async function request(path, options = {}) {
-    const response = await fetch(path, {
+    const response = await fetch(`${BASE}${path}`, {
         headers: {
             ...JSON_HEADERS,
             ...(options.headers ?? {})
         },
         ...options
     });
-
     if (!response.ok) {
         const text = await response.text();
         throw new Error(text || `Request failed with ${response.status}`);
     }
-
     if (response.status === 204) {
         return null;
     }
-
     return response.json();
 }
 
