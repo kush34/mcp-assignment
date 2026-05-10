@@ -8,9 +8,13 @@ export type ToolAnnotations = {
     readOnlyHint?: boolean;
 } | undefined;
 
+export type ServerTransportType = "stdio" | "remote" | "sse";
+
 export type RegisteredTool = {
     name: string;
+    rawName: string;
     server: string;
+    transport: ServerTransportType;
     description: string;
     inputSchema: JsonSchema;
     outputSchema?: JsonSchema;
@@ -19,10 +23,24 @@ export type RegisteredTool = {
 
 export type RegisteredServer = {
     name: string;
-    command: string;
-    args: string[];
+    type: ServerTransportType;
+    command?: string;
+    args?: string[];
     cwd?: string;
     env?: NodeJS.ProcessEnv;
+    url?: string;
+    headers?: Record<string, string>;
+};
+
+export type ServerHealth = {
+    name: string;
+    transport: ServerTransportType;
+    status: "connecting" | "connected" | "disconnected" | "error";
+    tools: number;
+    latencyMs?: number;
+    lastError?: string;
+    url?: string;
+    command?: string;
 };
 
 export type MergedToolDefinition = {
@@ -44,10 +62,13 @@ export type McpClientLike = {
 };
 
 export const toolRegistry = new Map<string, RegisteredTool>();
-
 export const mcpClients = new Map<string, McpClientLike>();
-
 export const serverRegistry = new Map<string, RegisteredServer>();
+export const serverHealthRegistry = new Map<string, ServerHealth>();
+
+export function buildNamespacedToolName(serverName: string, toolName: string) {
+    return `${serverName}.${toolName}`;
+}
 
 export function upsertTool(tool: RegisteredTool) {
     toolRegistry.set(tool.name, tool);
@@ -58,10 +79,26 @@ export function upsertServer(server: RegisteredServer, client: McpClientLike) {
     mcpClients.set(server.name, client);
 }
 
+export function updateServerHealth(name: string, health: Partial<ServerHealth>) {
+    const existing = serverHealthRegistry.get(name);
+    const base: ServerHealth = existing ?? {
+        name,
+        transport: "stdio",
+        status: "disconnected",
+        tools: 0
+    };
+
+    serverHealthRegistry.set(name, {
+        ...base,
+        ...health
+    });
+}
+
 export function clearRegistry() {
     toolRegistry.clear();
     mcpClients.clear();
     serverRegistry.clear();
+    serverHealthRegistry.clear();
 }
 
 export function getLLMTools(): MergedToolDefinition[] {
@@ -70,4 +107,10 @@ export function getLLMTools(): MergedToolDefinition[] {
         description: tool.description,
         inputSchema: tool.inputSchema
     }));
+}
+
+export function listServerHealth() {
+    return [...serverHealthRegistry.values()].sort((left, right) =>
+        left.name.localeCompare(right.name)
+    );
 }

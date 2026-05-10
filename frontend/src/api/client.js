@@ -31,6 +31,7 @@ export const api = {
     getPendingApprovals: () => request("/approvals/pending"),
     approve: id => request(`/approvals/${id}/approve`, { method: "POST" }),
     deny: id => request(`/approvals/${id}/deny`, { method: "POST" }),
+    getServers: () => request("/servers"),
     getLogs: params => {
         const search = new URLSearchParams();
 

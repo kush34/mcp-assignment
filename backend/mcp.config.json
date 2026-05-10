@@ -1,0 +1,19 @@
+{
+  "servers": [
+    {
+      "name": "filesystem",
+      "type": "stdio",
+      "command": "node",
+      "args": ["dist/index.js"],
+      "cwd": "./mcp"
+    },
+    {
+      "name": "exa-web-search",
+      "type": "remote",
+      "url": "https://mcp.exa.ai/mcp",
+      "headers": {
+        "x-api-key": "${EXA_API_KEY}"
+      }
+    }
+  ]
+}   

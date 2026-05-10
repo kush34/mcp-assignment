@@ -1,33 +1,98 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { Client } from "../../../mcp/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js";
+import { SSEClientTransport } from "../../../mcp/node_modules/@modelcontextprotocol/sdk/dist/esm/client/sse.js";
 import { StdioClientTransport } from "../../../mcp/node_modules/@modelcontextprotocol/sdk/dist/esm/client/stdio.js";
+import { StreamableHTTPClientTransport } from "../../../mcp/node_modules/@modelcontextprotocol/sdk/dist/esm/client/streamableHttp.js";
 import { discoverServerTools } from "./discover.js";
+import { loadMcpConfig } from "./config.js";
 import {
     clearRegistry,
+    updateServerHealth,
     upsertServer,
     type McpClientLike,
-    type RegisteredServer
+    type RegisteredServer,
+    type ServerTransportType
 } from "../registry/tools.js";
 import { log } from "../utils/logger.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const projectRoot = path.resolve(__dirname, "../../..");
-
-export const defaultServers: RegisteredServer[] = [
-    {
-        name: "filesystem",
-        command: "node",
-        args: ["dist/index.js"],
-        cwd: path.resolve(projectRoot, "mcp")
-    }
-];
-
-function createClient(server: RegisteredServer): {
+type ConnectedServer = {
     client: McpClientLike;
-    transport: StdioClientTransport;
-} {
+    transport: unknown;
+};
+
+export async function connectAllServers() {
+    clearRegistry();
+    const config = loadMcpConfig();
+
+    for (const server of config.servers) {
+        updateServerHealth(server.name, {
+            name: server.name,
+            transport: server.type,
+            status: "connecting",
+            tools: 0,
+            ...(server.url ? { url: server.url } : {}),
+            ...(server.command ? { command: server.command } : {})
+        });
+
+        log("BOOT", `connecting ${server.name}`, {
+            transport: server.type,
+            ...(server.url ? { url: server.url } : {}),
+            ...(server.command ? { command: server.command, args: server.args } : {})
+        });
+
+        try {
+            const { client, transport } = await connectServer(server);
+            await client.connect(transport);
+            upsertServer(server, client);
+            await discoverServerTools(server, client);
+            log("BOOT", `connected ${server.name}`);
+        } catch (error) {
+            updateServerHealth(server.name, {
+                status: "error",
+                lastError: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+        }
+    }
+
+    return config.servers;
+}
+
+export async function disconnectAllServers() {
+    for (const [serverName, client] of (await import("../registry/tools.js")).mcpClients) {
+        try {
+            await client.close();
+            updateServerHealth(serverName, { status: "disconnected" });
+            log("BOOT", `disconnected ${serverName}`);
+        } catch (error) {
+            updateServerHealth(serverName, {
+                status: "error",
+                lastError: error instanceof Error ? error.message : String(error)
+            });
+            log("BOOT", `failed to disconnect ${serverName}`, {
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    }
+}
+
+async function connectServer(server: RegisteredServer): Promise<ConnectedServer> {
+    switch (server.type) {
+        case "stdio":
+            return connectStdio(server);
+        case "remote":
+            return connectRemote(server);
+        case "sse":
+            return connectSse(server);
+        default:
+            throw new Error(`Unsupported MCP transport: ${String(server.type)}`);
+    }
+}
+
+function connectStdio(server: RegisteredServer): ConnectedServer {
+    if (!server.command) {
+        throw new Error(`Stdio server ${server.name} is missing command`);
+    }
+
     const env = server.env
         ? Object.fromEntries(
             Object.entries(server.env).filter(
@@ -38,61 +103,72 @@ function createClient(server: RegisteredServer): {
 
     const transport = new StdioClientTransport({
         command: server.command,
-        args: server.args,
+        args: server.args ?? [],
         ...(server.cwd ? { cwd: server.cwd } : {}),
         ...(env ? { env } : {}),
         stderr: "pipe"
     });
 
-    const client = new Client({
-        name: "runtime-mcp-orchestrator",
-        version: "1.0.0"
+    attachStderrLogger(server.name, transport);
+    return { client: createClient(), transport };
+}
+
+function connectRemote(server: RegisteredServer): ConnectedServer {
+    if (!server.url) {
+        throw new Error(`Remote server ${server.name} is missing url`);
+    }
+
+    const transport = new StreamableHTTPClientTransport(new URL(server.url), {
+        requestInit: {
+            headers: server.headers ?? {}
+        }
     });
 
+    return { client: createClient(), transport };
+}
+
+function connectSse(server: RegisteredServer): ConnectedServer {
+    if (!server.url) {
+        throw new Error(`SSE server ${server.name} is missing url`);
+    }
+
+    const headers = server.headers ?? {};
+    const transport = new SSEClientTransport(new URL(server.url), {
+        requestInit: {
+            headers
+        },
+        eventSourceInit: {
+            fetch: (input, init) => {
+                const mergedHeaders = new Headers(init?.headers);
+
+                for (const [key, value] of Object.entries(headers)) {
+                    mergedHeaders.set(key, value);
+                }
+
+                return fetch(input, {
+                    ...init,
+                    headers: mergedHeaders
+                });
+            }
+        }
+    });
+
+    return { client: createClient(), transport };
+}
+
+function createClient(): McpClientLike {
+    return new Client({
+        name: "runtime-mcp-orchestrator",
+        version: "1.0.0"
+    }) as McpClientLike;
+}
+
+function attachStderrLogger(serverName: string, transport: StdioClientTransport) {
     transport.stderr?.on("data", chunk => {
         const stderr = chunk.toString().trim();
 
         if (stderr.length > 0) {
-            log("MCP", `${server.name} stderr`, { stderr });
+            log("MCP", `${serverName} stderr`, { stderr });
         }
     });
-
-    return {
-        client: client as McpClientLike,
-        transport
-    };
-}
-
-export async function connectAllServers(servers = defaultServers) {
-    clearRegistry();
-
-    for (const server of servers) {
-        log("BOOT", `connecting ${server.name}`, {
-            command: server.command,
-            args: server.args
-        });
-
-        const { client, transport } = createClient(server);
-
-        await client.connect(transport);
-        upsertServer(server, client);
-        await discoverServerTools(server, client);
-
-        log("BOOT", `connected ${server.name}`);
-    }
-
-    return servers;
-}
-
-export async function disconnectAllServers() {
-    for (const [serverName, client] of (await import("../registry/tools.js")).mcpClients) {
-        try {
-            await client.close();
-            log("BOOT", `disconnected ${serverName}`);
-        } catch (error) {
-            log("BOOT", `failed to disconnect ${serverName}`, {
-                error: error instanceof Error ? error.message : String(error)
-            });
-        }
-    }
 }

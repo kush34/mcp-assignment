@@ -34,7 +34,7 @@ export async function executeTool(
     const startedAt = Date.now();
     const rawResult = await withTimeout(
         client.callTool({
-            name: toolUse.name,
+            name: tool.rawName,
             arguments: toolUse.input
         }),
         timeoutMs,

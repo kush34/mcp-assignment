@@ -123,9 +123,11 @@ function sanitizeGeminiValue(value: unknown): unknown {
 }
 
 const DISALLOWED_SCHEMA_KEYS = new Set([
-    "$schema",
-    "$id",
-    "$defs",
-    "definitions",
-    "unevaluatedProperties"
+  'additionalProperties',
+  '$schema',
+  '$id',
+  'examples',
+  'default',
+  'definitions',
+  '$defs',
 ]);

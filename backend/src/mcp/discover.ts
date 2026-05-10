@@ -1,6 +1,10 @@
 import { log } from "../utils/logger.js";
 import type { McpClientLike, RegisteredServer } from "../registry/tools.js";
-import { upsertTool } from "../registry/tools.js";
+import {
+    buildNamespacedToolName,
+    updateServerHealth,
+    upsertTool
+} from "../registry/tools.js";
 
 const EMPTY_SCHEMA = {
     type: "object",
@@ -12,10 +16,12 @@ export async function discoverServerTools(
     server: RegisteredServer,
     client: McpClientLike
 ) {
+    const startedAt = Date.now();
     const toolList = await client.listTools();
+    const latencyMs = Date.now() - startedAt;
 
     for (const tool of toolList.tools as Array<Record<string, unknown>>) {
-        const name = typeof tool.name === "string" ? tool.name : "";
+        const rawName = typeof tool.name === "string" ? tool.name : "";
         const description = typeof tool.description === "string"
             ? tool.description
             : "No description provided";
@@ -38,23 +44,33 @@ export async function discoverServerTools(
             ? tool.annotations
             : undefined;
 
-        if (name.length === 0) {
+        if (rawName.length === 0) {
             continue;
         }
 
-        const registeredTool = {
-            name,
+        upsertTool({
+            name: buildNamespacedToolName(server.name, rawName),
+            rawName,
             server: server.name,
+            transport: server.type,
             description,
             inputSchema,
             ...(outputSchema ? { outputSchema } : {}),
             ...(annotations ? { annotations } : {})
-        };
-
-        upsertTool(registeredTool);
+        });
     }
 
-    log("TOOLS", `discovered ${toolList.tools.length} tools from ${server.name}`);
+    updateServerHealth(server.name, {
+        name: server.name,
+        transport: server.type,
+        status: "connected",
+        tools: toolList.tools.length,
+        latencyMs
+    });
+
+    log("TOOLS", `discovered ${toolList.tools.length} tools from ${server.name}`, {
+        latencyMs
+    });
 
     return toolList.tools;
 }

@@ -10,6 +10,7 @@ export default defineConfig({
             "/rules": "http://localhost:3000",
             "/approvals": "http://localhost:3000",
             "/logs": "http://localhost:3000",
+            "/servers": "http://localhost:3000",
             "/health": "http://localhost:3000"
         }
     }

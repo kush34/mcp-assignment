@@ -2,15 +2,17 @@ import { useState } from "react";
 import Rules from "./pages/Rules.jsx";
 import Approvals from "./pages/Approvals.jsx";
 import Logs from "./pages/Logs.jsx";
+import Servers from "./pages/Servers.jsx";
 
 const tabs = [
+    { id: "servers", label: "Servers" },
     { id: "rules", label: "Rules" },
     { id: "approvals", label: "Approvals" },
     { id: "logs", label: "Logs" }
 ];
 
 export default function App() {
-    const [activeTab, setActiveTab] = useState("rules");
+    const [activeTab, setActiveTab] = useState("servers");
 
     return (
         <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(245,158,11,0.18),_transparent_30%),linear-gradient(180deg,#09111f_0%,#0f172a_40%,#111827_100%)] text-slate-100">
@@ -40,6 +42,7 @@ export default function App() {
                     ))}
                 </nav>
 
+                {activeTab === "servers" ? <Servers /> : null}
                 {activeTab === "rules" ? <Rules /> : null}
                 {activeTab === "approvals" ? <Approvals /> : null}
                 {activeTab === "logs" ? <Logs /> : null}

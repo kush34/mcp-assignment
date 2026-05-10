@@ -3,6 +3,7 @@ import { listRules, createRule, updateRule, deleteRule } from "../control-plane/
 import { listPendingApprovals, setApprovalStatus, getApproval } from "../control-plane/approvals.js";
 import { listLogs } from "../control-plane/logs.js";
 import { serializeApproval, serializeLog, serializeRule } from "../control-plane/format.js";
+import { listServerHealth } from "../registry/tools.js";
 
 export const governanceRouter = Router();
 
@@ -84,4 +85,8 @@ governanceRouter.get("/approvals/:id", (request, response) => {
     }
 
     response.json(serializeApproval(approval));
+});
+
+governanceRouter.get("/servers", (_request, response) => {
+    response.json(listServerHealth());
 });

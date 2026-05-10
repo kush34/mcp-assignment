@@ -52,7 +52,9 @@ export async function policyEngine(input: {
         };
     }
 
-    const matchedRule = getCachedRules().find(rule => matchesRule(rule, toolUse.name));
+    const matchedRule = getCachedRules().find(rule =>
+        matchesRule(rule, toolUse.name, tool.name)
+    );
 
     if (!matchedRule) {
         return {
@@ -182,7 +184,7 @@ async function waitForApproval(
     }
 }
 
-function matchesRule(rule: RuleRecord, toolName: string) {
+function matchesRule(rule: RuleRecord, toolName: string, fullToolName: string) {
     if (!rule.tool_pattern) {
         return false;
     }
@@ -193,7 +195,12 @@ function matchesRule(rule: RuleRecord, toolName: string) {
         .replace(/\*/g, ".*")
         .replace(/__SEP__/g, "[-_]");
 
-    return new RegExp(`^${escaped}$`).test(toolName);
+    const matcher = new RegExp(`^${escaped}$`);
+    const shortToolName = fullToolName.includes(".")
+        ? fullToolName.split(".").slice(1).join(".")
+        : toolName;
+
+    return matcher.test(toolName) || matcher.test(shortToolName) || matcher.test(fullToolName);
 }
 
 function parseRuleConfig(rawConfig: string | null): RuleConfig {
