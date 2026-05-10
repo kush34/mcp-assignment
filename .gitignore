@@ -1,0 +1,7 @@
+.agents
+.codex
+/backend/dist
+/mcp/dist
+/frontend/dist
+/backend/control-plane.db
+/backend/data/control-plane*
