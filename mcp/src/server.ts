@@ -2,9 +2,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { fileURLToPath } from "node:url";
 
-export const BASE_DIR =
-    "/home/ck34/Desktop/mcp/mcp/files-example";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+export const BASE_DIR = path.resolve(__dirname, "files-example");
 
 const resolveSafePath = (fileName: string) => {
     const filePath = path.resolve(BASE_DIR, fileName);
