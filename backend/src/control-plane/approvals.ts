@@ -6,17 +6,19 @@ export function createApproval(input: {
     conversationId: string;
     toolName: string;
     arguments: Record<string, unknown>;
+    expiresAt?: string | null;
 }) {
     const id = crypto.randomUUID();
 
     db.prepare(`
-        INSERT INTO approvals (id, conversation_id, tool_name, arguments, status)
-        VALUES (@id, @conversation_id, @tool_name, @arguments, 'pending')
+        INSERT INTO approvals (id, conversation_id, tool_name, arguments, status, expires_at)
+        VALUES (@id, @conversation_id, @tool_name, @arguments, 'pending', @expires_at)
     `).run({
         id,
         conversation_id: input.conversationId,
         tool_name: input.toolName,
-        arguments: JSON.stringify(input.arguments)
+        arguments: JSON.stringify(input.arguments),
+        expires_at: input.expiresAt ?? null
     });
 
     return getApproval(id);
@@ -41,6 +43,17 @@ export function setApprovalStatus(id: string, status: "approved" | "denied") {
             updated_at = CURRENT_TIMESTAMP
         WHERE id = @id
     `).run({ id, status });
+
+    return getApproval(id);
+}
+
+export function expireApproval(id: string) {
+    db.prepare(`
+        UPDATE approvals
+        SET status = 'expired',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = @id AND status = 'pending'
+    `).run({ id });
 
     return getApproval(id);
 }

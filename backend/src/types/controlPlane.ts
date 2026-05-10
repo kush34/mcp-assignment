@@ -14,6 +14,7 @@ export type ApprovalRecord = {
     tool_name: string;
     arguments: string;
     status: string;
+    expires_at: string | null;
     created_at: string;
     updated_at: string;
 };
@@ -32,6 +33,8 @@ export type LogRecord = {
 export type RuleConfig = {
     allowedPaths?: string[];
     note?: string;
+    priorityCategory?: "safety" | "compliance" | "efficiency";
+    approvalTimeoutMs?: number;
 };
 
 export type PolicyOutcome =

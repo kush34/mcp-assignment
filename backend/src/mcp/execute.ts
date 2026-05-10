@@ -1,4 +1,4 @@
-import { mcpClients, toolRegistry } from "../registry/tools.js";
+import { mcpClients, toolRegistry, type McpClientLike } from "../registry/tools.js";
 import type { ToolUseRequest } from "../policy/engine.js";
 import { withTimeout } from "../utils/timeout.js";
 
@@ -14,6 +14,8 @@ export type ToolExecutionResult = {
 };
 
 const DEFAULT_TOOL_TIMEOUT_MS = 10_000;
+const MAX_RETRY_ATTEMPTS = 3;
+const RETRY_BACKOFF_MS = 250;
 
 export async function executeTool(
     toolUse: ToolUseRequest,
@@ -32,14 +34,14 @@ export async function executeTool(
     }
 
     const startedAt = Date.now();
-    const rawResult = await withTimeout(
-        client.callTool({
-            name: tool.rawName,
-            arguments: toolUse.input
-        }),
+    const retryable = isRetrySafe(tool);
+    const rawResult = await callToolWithRetry({
+        client,
+        toolUse,
+        rawName: tool.rawName,
         timeoutMs,
-        `Tool ${toolUse.name}`
-    );
+        maxAttempts: retryable ? MAX_RETRY_ATTEMPTS : 1
+    });
     const durationMs = Date.now() - startedAt;
 
     const result: ToolExecutionResult = {
@@ -66,4 +68,61 @@ export async function executeTool(
     };
 
     return result;
+}
+
+async function callToolWithRetry(input: {
+    client: McpClientLike;
+    toolUse: ToolUseRequest;
+    rawName: string;
+    timeoutMs: number;
+    maxAttempts: number;
+}) {
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= input.maxAttempts; attempt += 1) {
+        try {
+            return await withTimeout(
+                input.client.callTool({
+                    name: input.rawName,
+                    arguments: input.toolUse.input
+                }),
+                input.timeoutMs,
+                `Tool ${input.toolUse.name}`
+            );
+        } catch (error) {
+            lastError = error;
+
+            if (!isRetryableTransportError(error) || attempt === input.maxAttempts) {
+                break;
+            }
+
+            await sleepWithBackoff(attempt);
+        }
+    }
+
+    throw decorateToolError(input.toolUse.name, lastError, input.maxAttempts);
+}
+
+function isRetrySafe(tool: NonNullable<ReturnType<typeof toolRegistry.get>>) {
+    return tool.annotations?.idempotentHint === true || tool.annotations?.readOnlyHint === true;
+}
+
+function isRetryableTransportError(error: unknown) {
+    if (!(error instanceof Error)) {
+        return false;
+    }
+
+    return /timed out|transport|socket|econnreset|network|broken pipe|closed/i.test(error.message);
+}
+
+async function sleepWithBackoff(attempt: number) {
+    const delayMs = RETRY_BACKOFF_MS * (2 ** (attempt - 1));
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+}
+
+function decorateToolError(toolName: string, error: unknown, attempts: number) {
+    const message = error instanceof Error ? error.message : String(error);
+    return new Error(
+        `Tool ${toolName} failed after ${attempts} attempt${attempts === 1 ? "" : "s"}: ${message}`
+    );
 }

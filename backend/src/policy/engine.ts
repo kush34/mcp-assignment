@@ -1,4 +1,4 @@
-import { createApproval, getApproval } from "../control-plane/approvals.js";
+import { createApproval, expireApproval, getApproval } from "../control-plane/approvals.js";
 import { getCachedRules } from "../control-plane/cache.js";
 import { createLog } from "../control-plane/logs.js";
 import { toolRegistry } from "../registry/tools.js";
@@ -9,6 +9,24 @@ export type ToolUseRequest = {
     id: string;
     name: string;
     input: Record<string, unknown>;
+};
+
+const APPROVAL_POLL_INTERVAL_MS = 1_000;
+const DEFAULT_APPROVAL_TIMEOUT_MS = 5 * 60_000;
+const RULE_PRIORITY_ORDER = ["safety", "compliance", "efficiency"] as const;
+const ACTION_SEVERITY = {
+    deny: 3,
+    approval: 2,
+    hold: 2,
+    validate: 1,
+    allow: 0
+} as const;
+type NormalizedRuleAction = keyof typeof ACTION_SEVERITY;
+type RuleResolutionCandidate = {
+    rule: RuleRecord;
+    config: RuleConfig;
+    priority: (typeof RULE_PRIORITY_ORDER)[number];
+    action: NormalizedRuleAction;
 };
 
 export async function policyEngine(input: {
@@ -52,39 +70,50 @@ export async function policyEngine(input: {
         };
     }
 
-    const matchedRule = getCachedRules().find(rule =>
+    const matchedRules = getCachedRules().filter(rule =>
         matchesRule(rule, toolUse.name, tool.name)
     );
 
-    if (!matchedRule) {
+    if (matchedRules.length === 0) {
         return {
             status: "allow",
             reason: "Allowed by default policy"
         };
     }
 
-    const config = parseRuleConfig(matchedRule.config);
+    const resolution = resolveRuleDecision(matchedRules);
 
-    if (matchedRule.action === "deny") {
+    if (resolution.conflict) {
+        createLog({
+            conversationId,
+            type: "policy_conflict",
+            payload: {
+                tool: toolUse.name,
+                conflict: resolution.conflict
+            }
+        });
+    }
+
+    if (resolution.decision === "deny") {
         createLog({
             conversationId,
             type: "blocked",
             payload: {
                 tool: toolUse.name,
-                ruleId: matchedRule.id,
-                reason: "Blocked by persisted rule"
+                ruleId: resolution.rule.id,
+                reason: resolution.reason
             }
         });
 
         return {
             status: "deny",
-            reason: "Blocked by persisted rule",
-            ruleId: matchedRule.id
+            reason: resolution.reason,
+            ruleId: resolution.rule.id
         };
     }
 
-    if (matchedRule.action === "validate") {
-        const valid = validateToolInput(toolUse, config);
+    if (resolution.decision === "validate") {
+        const valid = validateToolInput(toolUse, resolution.config);
 
         if (!valid.ok) {
             createLog({
@@ -92,7 +121,7 @@ export async function policyEngine(input: {
                 type: "blocked",
                 payload: {
                     tool: toolUse.name,
-                    ruleId: matchedRule.id,
+                    ruleId: resolution.rule.id,
                     reason: valid.reason
                 }
             });
@@ -100,22 +129,27 @@ export async function policyEngine(input: {
             return {
                 status: "deny",
                 reason: valid.reason,
-                ruleId: matchedRule.id
+                ruleId: resolution.rule.id
             };
         }
 
         return {
             status: "validate",
             reason: "Validated by persisted rule",
-            ruleId: matchedRule.id
+            ruleId: resolution.rule.id
         };
     }
 
-    if (matchedRule.action === "approval" || matchedRule.action === "hold") {
+    if (resolution.decision === "approval" || resolution.decision === "hold") {
+        const timeoutMs = normalizeApprovalTimeoutMs(
+            resolution.config.approvalTimeoutMs
+        );
+        const expiresAt = new Date(Date.now() + timeoutMs).toISOString();
         const approval = createApproval({
             conversationId,
             toolName: toolUse.name,
-            arguments: toolUse.input
+            arguments: toolUse.input,
+            expiresAt
         });
 
         createLog({
@@ -123,11 +157,19 @@ export async function policyEngine(input: {
             type: "approval_wait",
             payload: {
                 tool: toolUse.name,
-                approvalId: approval?.id
+                approvalId: approval?.id,
+                expiresAt
             }
         });
 
-        return waitForApproval(conversationId, approval?.id ?? "", toolUse.name, matchedRule.id);
+        return waitForApproval({
+            conversationId,
+            approvalId: approval?.id ?? "",
+            toolName: toolUse.name,
+            ruleId: resolution.rule.id,
+            expiresAt,
+            timeoutMs
+        });
     }
 
     return {
@@ -136,28 +178,35 @@ export async function policyEngine(input: {
     };
 }
 
-async function waitForApproval(
-    conversationId: string,
-    approvalId: string,
-    toolName: string,
-    ruleId: string
-): Promise<PolicyOutcome> {
+async function waitForApproval(input: {
+    conversationId: string;
+    approvalId: string;
+    toolName: string;
+    ruleId: string;
+    expiresAt: string;
+    timeoutMs: number;
+}): Promise<PolicyOutcome> {
+    const { conversationId, approvalId, toolName, ruleId, expiresAt, timeoutMs } = input;
+
     while (true) {
         const current = getApproval(approvalId);
 
-        if (!current || current.status === "denied") {
+        if (!current || current.status === "denied" || current.status === "expired") {
             createLog({
                 conversationId,
                 type: "approval_denied",
                 payload: {
                     tool: toolName,
-                    approvalId
+                    approvalId,
+                    status: current?.status ?? "missing"
                 }
             });
 
             return {
                 status: "deny",
-                reason: "Denied by human approval",
+                reason: current?.status === "expired"
+                    ? `Approval timed out after ${Math.ceil(timeoutMs / 1000)}s`
+                    : "Denied by human approval",
                 ruleId
             };
         }
@@ -180,7 +229,27 @@ async function waitForApproval(
             };
         }
 
-        await sleep(1_000);
+        if (Date.now() >= Date.parse(expiresAt)) {
+            expireApproval(approvalId);
+
+            createLog({
+                conversationId,
+                type: "approval_timeout",
+                payload: {
+                    tool: toolName,
+                    approvalId,
+                    expiresAt
+                }
+            });
+
+            return {
+                status: "deny",
+                reason: `Approval timed out after ${Math.ceil(timeoutMs / 1000)}s. Action remains queued until it expires; no tool call was executed.`,
+                ruleId
+            };
+        }
+
+        await sleep(APPROVAL_POLL_INTERVAL_MS);
     }
 }
 
@@ -213,6 +282,123 @@ function parseRuleConfig(rawConfig: string | null): RuleConfig {
     } catch {
         return {};
     }
+}
+
+function resolveRuleDecision(rules: RuleRecord[]) {
+    const enriched: RuleResolutionCandidate[] = rules.map(rule => {
+        const config = parseRuleConfig(rule.config);
+        const priority = inferPriorityCategory(rule, config);
+        return {
+            rule,
+            config,
+            priority,
+            action: normalizeRuleAction(rule.action)
+        };
+    });
+
+    if (enriched.length === 0) {
+        throw new Error("resolveRuleDecision requires at least one matched rule");
+    }
+
+    const highestPriority = Math.min(
+        ...enriched.map(item => RULE_PRIORITY_ORDER.indexOf(item.priority))
+    );
+    const highestPriorityRules = enriched.filter(
+        item => RULE_PRIORITY_ORDER.indexOf(item.priority) === highestPriority
+    );
+    const distinctActions = [...new Set(highestPriorityRules.map(item => item.action))];
+
+    if (distinctActions.length > 1) {
+        const chosen = highestPriorityRules.sort(compareRulePrecedence)[0] ?? enriched[0]!;
+        const reasons = highestPriorityRules.map(item => ({
+            ruleId: item.rule.id,
+            action: item.action,
+            priority: item.priority
+        }));
+
+        return {
+            decision: "deny" as const,
+            rule: chosen.rule,
+            config: chosen.config,
+            reason: `Conflicting ${RULE_PRIORITY_ORDER[highestPriority]} rules matched this tool call; denying by fail-safe policy`,
+            conflict: reasons
+        };
+    }
+
+    const chosen = highestPriorityRules.sort(compareRulePrecedence)[0] ?? enriched[0]!;
+    const lowerPriorityConflicts = enriched
+        .filter(item => item.rule.id !== chosen.rule.id && item.action !== chosen.action)
+        .map(item => ({
+            ruleId: item.rule.id,
+            action: item.action,
+            priority: item.priority
+        }));
+
+    return {
+        decision: chosen.action,
+        rule: chosen.rule,
+        config: chosen.config,
+        reason: chosen.action === "deny"
+            ? "Blocked by persisted rule"
+            : "Resolved by policy priority",
+        ...(lowerPriorityConflicts.length > 0
+            ? { conflict: [{ ruleId: chosen.rule.id, action: chosen.action, priority: chosen.priority }, ...lowerPriorityConflicts] }
+            : {})
+    };
+}
+
+function inferPriorityCategory(
+    rule: RuleRecord,
+    config: RuleConfig
+): (typeof RULE_PRIORITY_ORDER)[number] {
+    if (config.priorityCategory && RULE_PRIORITY_ORDER.includes(config.priorityCategory)) {
+        return config.priorityCategory;
+    }
+
+    const normalizedType = rule.type.trim().toLowerCase();
+
+    if (RULE_PRIORITY_ORDER.includes(normalizedType as (typeof RULE_PRIORITY_ORDER)[number])) {
+        return normalizedType as (typeof RULE_PRIORITY_ORDER)[number];
+    }
+
+    if (rule.action === "deny") {
+        return "safety";
+    }
+
+    if (rule.action === "approval" || rule.action === "hold") {
+        return "compliance";
+    }
+
+    return "efficiency";
+}
+
+function normalizeRuleAction(action: string): NormalizedRuleAction {
+    if (action === "deny" || action === "approval" || action === "hold" || action === "validate") {
+        return action;
+    }
+
+    return "allow";
+}
+
+function compareRulePrecedence(
+    left: RuleResolutionCandidate,
+    right: RuleResolutionCandidate
+) {
+    const severityGap = ACTION_SEVERITY[right.action] - ACTION_SEVERITY[left.action];
+
+    if (severityGap !== 0) {
+        return severityGap;
+    }
+
+    return right.rule.created_at.localeCompare(left.rule.created_at);
+}
+
+function normalizeApprovalTimeoutMs(timeoutMs: number | undefined) {
+    if (!Number.isFinite(timeoutMs) || timeoutMs === undefined || timeoutMs <= 0) {
+        return DEFAULT_APPROVAL_TIMEOUT_MS;
+    }
+
+    return timeoutMs;
 }
 
 function validateToolInput(toolUse: ToolUseRequest, config: RuleConfig) {

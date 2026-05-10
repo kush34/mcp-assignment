@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS approvals (
     tool_name TEXT,
     arguments TEXT,
     status TEXT,
+    expires_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -50,5 +51,13 @@ CREATE TABLE IF NOT EXISTS logs (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 `);
+
+const approvalColumns = db.prepare("PRAGMA table_info(approvals)").all() as Array<{
+    name: string;
+}>;
+
+if (!approvalColumns.some(column => column.name === "expires_at")) {
+    db.exec("ALTER TABLE approvals ADD COLUMN expires_at DATETIME");
+}
 
 log("BOOT", "sqlite initialized", { databasePath });

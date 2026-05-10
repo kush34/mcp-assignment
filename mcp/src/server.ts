@@ -34,7 +34,11 @@ export const server = new McpServer(
 server.registerTool(
     "list-files",
     {
-        description: "List files inside the files-example directory"
+        description: "List files inside the files-example directory",
+        annotations: {
+            readOnlyHint: true,
+            idempotentHint: true
+        }
     },
     async () => {
         try {
@@ -72,6 +76,10 @@ server.registerTool(
     "read-file",
     {
         description: "Read a file from the files-example directory",
+        annotations: {
+            readOnlyHint: true,
+            idempotentHint: true
+        },
         inputSchema: {
             fileName: z.string().min(1)
         }
@@ -107,6 +115,9 @@ server.registerTool(
     "write-file",
     {
         description: "Write a file inside the files-example directory",
+        annotations: {
+            idempotentHint: true
+        },
         inputSchema: {
             fileName: z.string().min(1),
             content: z.string()
@@ -115,6 +126,19 @@ server.registerTool(
     async ({ fileName, content }) => {
         try {
             const filePath = resolveSafePath(fileName);
+            const existingContent = await fs.readFile(filePath, "utf-8").catch(() => null);
+
+            if (existingContent === content) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `File already up to date: ${fileName}`
+                        }
+                    ]
+                };
+            }
+
             await fs.writeFile(filePath, content, "utf-8");
 
             return {
@@ -143,6 +167,10 @@ server.registerTool(
     "delete-file",
     {
         description: "Delete a file from the files-example directory",
+        annotations: {
+            idempotentHint: true,
+            destructiveHint: true
+        },
         inputSchema: {
             fileName: z.string().min(1)
         }
@@ -150,13 +178,19 @@ server.registerTool(
     async ({ fileName }) => {
         try {
             const filePath = resolveSafePath(fileName);
-            await fs.unlink(filePath);
+            await fs.unlink(filePath).catch((error: NodeJS.ErrnoException) => {
+                if (error.code === "ENOENT") {
+                    return;
+                }
+
+                throw error;
+            });
 
             return {
                 content: [
                     {
                         type: "text",
-                        text: `File deleted: ${fileName}`
+                        text: `File deleted if present: ${fileName}`
                     }
                 ]
             };
@@ -178,6 +212,10 @@ server.registerTool(
     "search-files",
     {
         description: "Search filenames in the files-example directory",
+        annotations: {
+            readOnlyHint: true,
+            idempotentHint: true
+        },
         inputSchema: {
             searchTerm: z.string().min(1)
         }

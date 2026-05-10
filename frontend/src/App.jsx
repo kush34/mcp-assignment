@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Rules from "./pages/Rules.jsx";
 import Approvals from "./pages/Approvals.jsx";
 import Logs from "./pages/Logs.jsx";
 import Servers from "./pages/Servers.jsx";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "./api/client.js";
 
 const tabs = [
     { id: "servers", label: "Servers" },
@@ -13,10 +15,30 @@ const tabs = [
 
 export default function App() {
     const [activeTab, setActiveTab] = useState("servers");
+    const [toast, setToast] = useState(null);
+    const prevCount = useRef(0);
 
+    const { data: approvals = [] } = useQuery({
+        queryKey: ["approvals", "pending"],
+        queryFn: api.getPendingApprovals,
+        refetchInterval: 2_000
+    });
+
+    useEffect(() => {
+        if (approvals.length > prevCount.current) {
+            setToast(`${approvals.length - prevCount.current} new approval request(s)`);
+            setTimeout(() => setToast(null), 3000);
+        }
+        prevCount.current = approvals.length;
+    }, [approvals.length]);
     return (
         <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(245,158,11,0.18),_transparent_30%),linear-gradient(180deg,#09111f_0%,#0f172a_40%,#111827_100%)] text-slate-100">
             <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+                {toast && (
+                    <div className="fixed bottom-6 right-6 z-50 rounded-2xl border border-amber-300/30 bg-slate-900 px-5 py-3 text-sm text-amber-300 shadow-lg">
+                        🔔 {toast}
+                    </div>
+                )}
                 <header className="mb-8 rounded-3xl border border-white/10 bg-white/5 p-6 shadow-panel backdrop-blur">
                     <p className="font-body text-xs uppercase tracking-[0.35em] text-amber-300">Governance Layer</p>
                     <h1 className="mt-3 font-display text-4xl text-white sm:text-5xl">MCP Control Plane</h1>
@@ -31,11 +53,10 @@ export default function App() {
                             key={tab.id}
                             type="button"
                             onClick={() => setActiveTab(tab.id)}
-                            className={`rounded-full border px-4 py-2 text-sm transition ${
-                                activeTab === tab.id
-                                    ? "border-amber-300 bg-amber-300 text-slate-950"
-                                    : "border-white/10 bg-white/5 text-slate-200 hover:border-amber-200/50 hover:bg-white/10"
-                            }`}
+                            className={`rounded-full border px-4 py-2 text-sm transition ${activeTab === tab.id
+                                ? "border-amber-300 bg-amber-300 text-slate-950"
+                                : "border-white/10 bg-white/5 text-slate-200 hover:border-amber-200/50 hover:bg-white/10"
+                                }`}
                         >
                             {tab.label}
                         </button>
