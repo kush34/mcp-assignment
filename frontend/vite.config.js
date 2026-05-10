@@ -1,17 +1,24 @@
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), "");
+  const BACKEND_URL = env.BACKEND_URL;
+  if(!BACKEND_URL){
+    throw new Error("No Backend URL found in the env vars.")
+  }
+  return {
     plugins: [react()],
     server: {
-        port: 5173,
-        proxy: {
-            "/agent": "http://localhost:3000",
-            "/rules": "http://localhost:3000",
-            "/approvals": "http://localhost:3000",
-            "/logs": "http://localhost:3000",
-            "/servers": "http://localhost:3000",
-            "/health": "http://localhost:3000"
-        }
+      port: 5173,
+      proxy: {
+        "/agent": BACKEND_URL,
+        "/rules": BACKEND_URL,
+        "/approvals": BACKEND_URL,
+        "/logs": BACKEND_URL,
+        "/servers": BACKEND_URL,
+        "/health": BACKEND_URL
+      }
     }
+  };
 });

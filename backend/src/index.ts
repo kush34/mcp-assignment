@@ -5,13 +5,23 @@ import "./db/index.js";
 import { governanceRouter } from "./routes/governance.js";
 import { loadEnv } from "./utils/env.js";
 import { log } from "./utils/logger.js";
+import cors from "cors";
 
 loadEnv();
 
 const app = express();
 const orchestrator = new RuntimeMcpOrchestrator();
 
+const FRONTEND_URL = process.env.FRONTEND_URL;
+
+if(!FRONTEND_URL){
+    throw new Error("No frontend URL configured")
+}
 app.use(express.json());
+app.use(cors({
+  origin: process.env.FRONTEND_URL,
+  credentials: true
+}));
 app.use(governanceRouter);
 
 app.get("/health", (_request, response) => {
