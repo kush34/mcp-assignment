@@ -1,7 +1,7 @@
-import { Client } from "../../../mcp/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js";
-import { SSEClientTransport } from "../../../mcp/node_modules/@modelcontextprotocol/sdk/dist/esm/client/sse.js";
-import { StdioClientTransport } from "../../../mcp/node_modules/@modelcontextprotocol/sdk/dist/esm/client/stdio.js";
-import { StreamableHTTPClientTransport } from "../../../mcp/node_modules/@modelcontextprotocol/sdk/dist/esm/client/streamableHttp.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { discoverServerTools } from "./discover.js";
 import { loadMcpConfig } from "./config.js";
 import {
