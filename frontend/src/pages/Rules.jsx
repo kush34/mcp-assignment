@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client.js";
 import RuleTable from "../components/RuleTable.jsx";
 
-export default function     Rules() {
+export default function Rules() {
     const queryClient = useQueryClient();
     const [toolPattern, setToolPattern] = useState("");
     const [action, setAction] = useState("deny");
@@ -116,14 +116,11 @@ export default function     Rules() {
 }
 
 function buildConfig(action, allowedPaths) {
-    if (action !== "validate") {
-        return {};
+    if (action === "validate") {
+        return {
+            allowedPaths: allowedPaths.split(",").map(s => s.trim()).filter(Boolean)
+        };
     }
-
-    return {
-        allowedPaths: allowedPaths
-            .split(",")
-            .map(item => item.trim())
-            .filter(Boolean)
-    };
+    if (action === "approval") return { requiresApproval: true };
+    return { blocked: true }; // deny
 }

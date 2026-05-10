@@ -23,13 +23,10 @@ export function serializeLog(log: LogRecord) {
 }
 
 function parseMaybeJson(value: string | null) {
-    if (!value) {
-        return null;
-    }
-
+    if (!value) return {};
     try {
         return JSON.parse(value);
     } catch {
-        return value;
+        return {};
     }
 }

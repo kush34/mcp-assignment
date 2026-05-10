@@ -19,11 +19,10 @@ export default function RuleTable({ rules, onToggle, onDelete }) {
                                     <button
                                         type="button"
                                         onClick={() => onToggle(rule)}
-                                        className={`rounded-full px-3 py-1 text-xs ${
-                                            rule.enabled
+                                        className={`rounded-full px-3 py-1 text-xs ${rule.enabled
                                                 ? "bg-emerald-400/20 text-emerald-200"
                                                 : "bg-slate-600/30 text-slate-300"
-                                        }`}
+                                            }`}
                                     >
                                         {rule.enabled ? "On" : "Off"}
                                     </button>
@@ -32,7 +31,7 @@ export default function RuleTable({ rules, onToggle, onDelete }) {
                                 <td className="px-4 py-4">{rule.action}</td>
                                 <td className="px-4 py-4">
                                     <pre className="max-w-md whitespace-pre-wrap font-mono text-xs text-slate-300">
-                                        {JSON.stringify(rule.config, null, 2)}
+                                        {JSON.stringify(rule.config)}
                                     </pre>
                                 </td>
                                 <td className="px-4 py-4">
