@@ -138,7 +138,7 @@ function connectSse(server: RegisteredServer): ConnectedServer {
             headers
         },
         eventSourceInit: {
-            fetch: (input, init) => {
+            fetch: (input: RequestInfo | URL, init?: RequestInit) => {
                 const mergedHeaders = new Headers(init?.headers);
 
                 for (const [key, value] of Object.entries(headers)) {
@@ -164,7 +164,7 @@ function createClient(): McpClientLike {
 }
 
 function attachStderrLogger(serverName: string, transport: StdioClientTransport) {
-    transport.stderr?.on("data", chunk => {
+    transport.stderr?.on("data", (chunk:Buffer) => {
         const stderr = chunk.toString().trim();
 
         if (stderr.length > 0) {
