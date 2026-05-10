@@ -4,9 +4,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { fileURLToPath } from "node:url";
 
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const BASE_DIR = path.resolve(__dirname, "files-example");
+const configuredBaseDir = process.env.FILESYSTEM_BASE_DIR?.trim();
+export const BASE_DIR = configuredBaseDir
+    ? path.resolve(configuredBaseDir)
+    : path.resolve(__dirname, "../files-example");
 
 const resolveSafePath = (fileName: string) => {
     const filePath = path.resolve(BASE_DIR, fileName);
@@ -42,6 +44,7 @@ server.registerTool(
     },
     async () => {
         try {
+            await fs.mkdir(BASE_DIR, { recursive: true });
             const entries = await fs.readdir(BASE_DIR, { withFileTypes: true });
             const files = entries
                 .filter(entry => entry.isFile())
@@ -139,6 +142,7 @@ server.registerTool(
                 };
             }
 
+            await fs.mkdir(path.dirname(filePath), { recursive: true });
             await fs.writeFile(filePath, content, "utf-8");
 
             return {
@@ -222,6 +226,7 @@ server.registerTool(
     },
     async ({ searchTerm }) => {
         try {
+            await fs.mkdir(BASE_DIR, { recursive: true });
             const entries = await fs.readdir(BASE_DIR, { withFileTypes: true });
             const matches = entries
                 .filter(entry => entry.isFile())
